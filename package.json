@@ -1,0 +1,21 @@
+{
+  "name": "sports-jedi-mcp",
+  "version": "0.1.0",
+  "description": "Sports Jedi for AI assistants: Parlay Grader, model picks, own NBA/NFL player props, long shots and results via MCP.",
+  "mcpName": "io.github.IMALI-DEFI/sports-jedi-mcp",
+  "type": "module",
+  "bin": { "sports-jedi-mcp": "src/server.js" },
+  "main": "src/server.js",
+  "files": ["src/", "README.md", "server.json"],
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "sports", "nba", "nfl", "parlay", "player-props", "sports-data", "claude"],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.25.0"
+  },
+  "engines": { "node": ">=20" }
+}
