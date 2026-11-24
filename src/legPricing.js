@@ -52,13 +52,13 @@ function homeLineOf(spread, game) {
 // Consensus spread from the home team's side (negative = home favored).
 export function consensusHomeSpread(game) {
   const books = (game?.bookmakers || []).map((b) => homeLineOf(b.spread, game)).filter((v) => v !== null);
-  if (books.length) return avg(books);
+  if (books.length) return round1(avg(books));
   return homeLineOf(game?.spread, game);
 }
 
 export function consensusTotal(game) {
   const books = (game?.bookmakers || []).map((b) => num(b.total)).filter((v) => v !== null && v > 0);
-  if (books.length) return avg(books);
+  if (books.length) return round1(avg(books));
   const t = num(game?.total);
   return t !== null && t > 0 ? t : null;
 }
