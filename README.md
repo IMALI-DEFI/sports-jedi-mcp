@@ -2,20 +2,17 @@
 
 Bring [Sports Jedi](https://sportsjedi.com) into Claude, ChatGPT, Cursor and any MCP client.
 
-| Tool | What |
-|---|---|
-| `grade_parlay` | Parlay Grader: confidence per leg and overall (legs = game id + team picked) |
-| `get_games` | Games with ids, teams and lines |
-| `get_game` | One game with Sports Jedi's analysis |
-| `get_picks` | Model picks with reasoning |
-| `get_player_props` | Sports Jedi's own NBA/NFL props (no college props) |
-| `list_leagues` | Covered leagues (NFL, NCAAF, NBA, MLB) |
-| `my_usage` | Your plan + requests left today |
-| `api_plans` | Developer plans |
+| Tool | What | Free | Paid key |
+|---|---|---|---|
+| `grade_parlay` | Parlay Grader: confidence per leg, combined confidence, risk | ✅ | ✅ |
+| `get_games` | Games with ids, teams, records and lines | ✅ | ✅ |
+| `get_game` | One game with the Jedi pick, confidence and factors | ✅ | ✅ |
+| `list_leagues` | Covered leagues (NFL, NCAAF, NBA, MLB) | ✅ | ✅ |
+| `get_picks` | Model picks with reasoning | | ✅ |
+| `get_player_props` | Sports Jedi's own NBA/NFL props (no college props) | | ✅ |
+| `my_usage` / `api_plans` | Your plan and requests left today | | ✅ |
 
-Access per tool follows your Sports Jedi API plan.
-
-Get a key (`sj_live_…`): https://sportsjedi.com/developers
+Works with no key: games, game analysis and the Parlay Grader. Picks and props need a key (`sj_live_…`): https://sportsjedi.com/developers
 
 ## Install (Claude Desktop / any stdio client)
 
@@ -25,7 +22,7 @@ Get a key (`sj_live_…`): https://sportsjedi.com/developers
     "sports-jedi": {
       "command": "npx",
       "args": ["-y", "sports-jedi-mcp"],
-      "env": { "SPORTS_JEDI_API_KEY": "sj_live_..." }
+      "env": { "SPORTS_JEDI_API_KEY": "sj_live_... (optional)" }
     }
   }
 }

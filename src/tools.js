@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ENDPOINTS } from './endpoints.js';
+import { ENDPOINTS, PUBLIC, LINKS } from './endpoints.js';
 
 export const LEAGUES = ['nfl', 'ncaaf', 'nba', 'mlb']; // from GET /v1/leagues
 // Sports Jedi only makes its own player props for NBA and NFL. No college props.
@@ -10,13 +10,16 @@ export const DISCLAIMER =
   'If gambling stops being fun, call 1-800-GAMBLER.';
 
 const UPGRADE =
-  'This needs a Sports Jedi API key (or a bigger plan). Get one at https://sportsjedi.com/developers, ' +
+  `This needs a Sports Jedi API key (or a bigger plan). Get one at ${LINKS.developers} ` +
   'then set SPORTS_JEDI_API_KEY in your MCP client config.';
 
-const text = (data, { disclaimer = true } = {}) => ({
+const FREE_NOTE =
+  `Free mode (no API key). Model picks and Sports Jedi's own player props are on a paid plan: ${LINKS.pricing}`;
+
+const text = (data, { disclaimer = true, note } = {}) => ({
   content: [{
     type: 'text',
-    text: (typeof data === 'string' ? data : JSON.stringify(data, null, 2)) + (disclaimer ? `\n\n${DISCLAIMER}` : ''),
+    text: (typeof data === 'string' ? data : JSON.stringify(data, null, 2)) + (note ? `\n\n${note}` : '') + (disclaimer ? `\n\n${DISCLAIMER}` : ''),
   }],
 });
 
@@ -29,24 +32,71 @@ const league = z.enum(LEAGUES).describe('League: ' + LEAGUES.join(', '));
 const up = l => l && l.toUpperCase();
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Game date YYYY-MM-DD (default today, US Eastern)');
 const limit = z.number().int().min(1).max(50).optional().describe('Max results (default 10)');
+const unwrap = r => (r && typeof r === 'object' && 'data' in r ? r.data : r);
+const idPath = (p, id) => p.replace(':id', encodeURIComponent(id));
 
-// The API decides what each plan can access; this server just passes the key
-// and turns 401/402/403/429 into an "upgrade at sportsjedi.com/developers" message.
-export function buildTools({ client }) {
+// Confidence for one leg, the same way /v1/parlays/analyze prices it:
+// the Jedi pick's confidence if the user picked that side, otherwise 100 minus it.
+export function legConfidence(game, analysis, pick) {
+  const P = String(pick).toUpperCase();
+  const home = game?.home || {}, away = game?.away || {};
+  const sides = [home.abbr, away.abbr].filter(Boolean).map(s => String(s).toUpperCase());
+  if (sides.length && !sides.includes(P)) {
+    return { error: `pick must be ${sides.join(' or ')} for this game` };
+  }
+  const names = s => [s.abbr, s.name].filter(Boolean).map(x => String(x).toUpperCase());
+  const jediPick = analysis?.pick ? String(analysis.pick).toUpperCase() : null;
+  const conf = Number(analysis?.confidence);
+  if (jediPick && conf > 0) {
+    const pickedTeam = [home, away].find(t => names(t).includes(P)) || {};
+    const agrees = names(pickedTeam).includes(jediPick) || jediPick === P;
+    return { confidence: Math.round((agrees ? conf : 100 - conf) * 10) / 10, jedi_pick: analysis.pick, agrees };
+  }
+  const isHome = String(home.abbr || '').toUpperCase() === P;
+  const prob = Number(isHome ? analysis?.homeWinProbability : analysis?.awayWinProbability);
+  if (prob > 0) return { confidence: Math.round((prob <= 1 ? prob * 100 : prob) * 10) / 10, jedi_pick: null };
+  return { error: 'no Sports Jedi rating for this game yet' };
+}
+
+export function buildTools({ client, hasKey }) {
+  async function freeParlay(legs) {
+    const priced = [], skipped = [];
+    for (const leg of legs) {
+      try {
+        const [game, analysis] = await Promise.all([
+          client.get(idPath(PUBLIC.game, leg.gameId)).then(unwrap),
+          client.get(idPath(PUBLIC.analysis, leg.gameId)).then(unwrap),
+        ]);
+        const r = legConfidence(game, analysis, leg.pick);
+        const matchup = game?.away && game?.home ? `${game.away.name} @ ${game.home.name}` : leg.gameId;
+        if (r.error) skipped.push({ gameId: leg.gameId, pick: leg.pick, matchup, reason: r.error });
+        else priced.push({ gameId: leg.gameId, pick: leg.pick.toUpperCase(), matchup, ...r });
+      } catch (e) {
+        skipped.push({ gameId: leg.gameId, pick: leg.pick, reason: e.status === 404 ? 'game not found' : e.message });
+      }
+    }
+    const result = priced.length
+      ? unwrap(await client.post(PUBLIC.gradeParlay, { legs: priced.map(l => ({ gameId: l.gameId, pick: l.pick, confidence: l.confidence })) }))
+      : { message: 'No legs could be rated.' };
+    return { ...result, legs: priced, skipped };
+  }
+
   return [
     {
       name: 'grade_parlay',
       description:
-        'Grade a parlay with the Sports Jedi Parlay Grader: combined confidence per leg and overall. ' +
+        'Grade a parlay with the Sports Jedi Parlay Grader: confidence per leg, combined confidence and risk. Works without an API key. ' +
         'Each leg is a game id plus the team abbreviation picked to win. Call get_games first to find the ' +
         'game ids and team abbreviations for the matchups the user named.',
       shape: {
         legs: z.array(z.object({
           gameId: z.string().min(1).describe('Game id from get_games'),
-          pick: z.string().min(2).max(6).describe('Team abbreviation picked to win, e.g. "KC" or "LAL"'),
+          pick: z.string().min(2).max(6).describe('Team abbreviation picked to win, from get_games'),
         })).min(1).max(15),
       },
-      handler: async ({ legs }) => text(await client.post(ENDPOINTS.gradeParlay, { legs: legs.map(l => ({ gameId: l.gameId, pick: l.pick.toUpperCase() })) })),
+      handler: async ({ legs }) => hasKey
+        ? text(await client.post(ENDPOINTS.gradeParlay, { legs: legs.map(l => ({ gameId: l.gameId, pick: l.pick.toUpperCase() })) }))
+        : text(await freeParlay(legs), { note: FREE_NOTE }),
     },
     {
       name: 'list_leagues',
@@ -56,26 +106,30 @@ export function buildTools({ client }) {
     },
     {
       name: 'get_games',
-      description: 'Games for a league and date, with game ids, team abbreviations and lines. Use the ids for grade_parlay.',
+      description: 'Games for a league, with game ids, team abbreviations, records and lines. Works without an API key. Use the ids for grade_parlay.',
       shape: { league, date, status: z.string().optional().describe('Optional game status filter') },
-      handler: async ({ league, date, status }) => text(await client.get(ENDPOINTS.games, { league: up(league), date, status }), { disclaimer: false }),
+      handler: async ({ league, date, status }) => hasKey
+        ? text(await client.get(ENDPOINTS.games, { league: up(league), date, status }), { disclaimer: false })
+        : text(await client.get(PUBLIC.games, { league: up(league), date, status }), { disclaimer: false }),
     },
     {
       name: 'get_game',
-      description: 'One game in detail, including the Sports Jedi analysis for it.',
+      description: "One game with Sports Jedi's analysis: the Jedi pick, confidence, market consensus and key factors. Works without an API key.",
       shape: { id: z.string().min(1).describe('Game id from get_games') },
-      handler: async ({ id }) => text(await client.get(ENDPOINTS.game.replace(':id', encodeURIComponent(id)))),
+      handler: async ({ id }) => hasKey
+        ? text(await client.get(idPath(ENDPOINTS.game, id)))
+        : text(await client.get(idPath(PUBLIC.analysis, id)), { note: FREE_NOTE }),
     },
     {
       name: 'get_picks',
-      description: "Sports Jedi's model picks for a league, with confidence and reasoning.",
+      description: "Sports Jedi's model picks for a league, with confidence and reasoning. Paid: needs an API key.",
       shape: { league, min_confidence: z.number().min(0).max(100).optional().describe('Only picks at or above this confidence %'), limit },
       handler: async ({ league, min_confidence, limit = 10 }) => text(await client.get(ENDPOINTS.picks, { league: up(league), min_confidence, limit })),
     },
     {
       name: 'get_player_props',
       description:
-        "Sports Jedi's own player props (its own projections, not copied sportsbook lines). NBA and NFL only — no college player props.",
+        "Sports Jedi's own player props (its own projections, not copied sportsbook lines). NBA and NFL only — no college player props. Paid: needs an API key.",
       shape: {
         league: z.enum(PROP_LEAGUES).describe('nba or nfl'),
         player: z.string().optional().describe('Filter to one player'),
@@ -86,7 +140,7 @@ export function buildTools({ client }) {
     },
     {
       name: 'my_usage',
-      description: "The caller's Sports Jedi API plan and how many requests are left today.",
+      description: "The caller's Sports Jedi API plan and how many requests are left today. Needs an API key.",
       shape: {},
       handler: async () => text(await client.get(ENDPOINTS.usage), { disclaimer: false }),
     },
