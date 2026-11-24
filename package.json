@@ -1,6 +1,6 @@
 {
   "name": "sports-jedi-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Sports Jedi for AI assistants: free Parlay Grader and game analysis; model picks and own NBA/NFL player props with an API key.",
   "mcpName": "io.github.IMALI-DEFI/sports-jedi-mcp",
   "type": "module",

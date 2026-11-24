@@ -75,3 +75,58 @@ test('unreachable API returns a clean error, not a crash', async () => {
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /Could not reach API/);
 });
+
+test('free: spread and total legs are priced from the game lines; props are skipped', async () => {
+  const NFL = {
+    id: 'n1', league: 'NFL',
+    home: { name: 'Kansas City Chiefs', abbr: 'KC' }, away: { name: 'Buffalo Bills', abbr: 'BUF' },
+    spread: { favorite: 'KC', line: -3 }, total: 48, bookmakers: [],
+  };
+  const api = await startMock({
+    'GET /api/games/n1': () => [200, { success: true, data: NFL }],
+    'POST /api/parlays/analyze': ({ body }) => [200, { success: true, data: { legs: body.legs.length, combinedConfidence: 25, risk: 'Medium' } }],
+  });
+  const tools = buildTools({ client: createClient({ baseUrl: api.url }), hasKey: false });
+  const r = await find(tools, 'grade_parlay').handler({ legs: [
+    { gameId: 'n1', market: 'spread', pick: 'buf', line: 3 },
+    { gameId: 'n1', market: 'total', pick: 'UNDER' },
+    { gameId: 'n1', market: 'total', pick: 'KC', line: 48 },
+  ] });
+  const posted = api.calls.find(c => c.path === '/api/parlays/analyze').body;
+  assert.deepEqual(posted, { legs: [{ gameId: 'n1', pick: 'BUF', confidence: 50 }, { gameId: 'n1', pick: 'UNDER', confidence: 50 }] });
+  assert.match(r.content[0].text, /OVER or UNDER/);
+  assert.ok(!api.calls.some(c => c.path.endsWith('/analysis')), 'line legs need only the game');
+  await api.close();
+});
+
+test('keyed: spread and total legs pass market and line through; moneyline legs are unchanged', async () => {
+  const api = await startMock({ 'POST /v1/parlays/analyze': ({ body }) => [200, { success: true, data: { legs: body.legs } }] });
+  const tools = buildTools({ client: createClient({ baseUrl: api.url, apiKey: 'sj1' }), hasKey: true });
+  await find(tools, 'grade_parlay').handler({ legs: [
+    { gameId: 'g1', pick: 'kc' },
+    { gameId: 'g1', market: 'moneyline', pick: 'kc' },
+    { gameId: 'g1', market: 'spread', pick: 'kc', line: -3.5 },
+    { gameId: 'g1', market: 'total', pick: 'over' },
+  ] });
+  assert.deepEqual(api.calls[0].body.legs, [
+    { gameId: 'g1', pick: 'KC' },
+    { gameId: 'g1', pick: 'KC' },
+    { gameId: 'g1', pick: 'KC', market: 'spread', line: -3.5 },
+    { gameId: 'g1', pick: 'OVER', market: 'total' },
+  ]);
+  await api.close();
+});
+
+test('grade_parlay tells the assistant to read bet slip screenshots', () => {
+  const tools = buildTools({ client: createClient({ baseUrl: 'http://127.0.0.1:9' }), hasKey: false });
+  const desc = find(tools, 'grade_parlay').description;
+  assert.match(desc, /screenshot/);
+  assert.match(desc, /Player props/);
+});
+
+test('legPricing.js matches the API copy byte for byte', async () => {
+  const fs = await import('node:fs');
+  const api = process.env.SJ_BACKEND_LEGPRICING;
+  if (!api || !fs.existsSync(api)) return; // only checked where the backend is checked out
+  assert.equal(fs.readFileSync(new URL('../src/legPricing.js', import.meta.url), 'utf8'), fs.readFileSync(api, 'utf8'));
+});

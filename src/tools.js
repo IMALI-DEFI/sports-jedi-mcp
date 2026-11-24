@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ENDPOINTS, PUBLIC, LINKS } from './endpoints.js';
+import { normalizeMarket, priceLineLeg } from './legPricing.js';
 
 export const LEAGUES = ['nfl', 'ncaaf', 'nba', 'mlb']; // from GET /v1/leagues
 // Sports Jedi only makes its own player props for NBA and NFL. No college props.
@@ -63,6 +64,19 @@ export function buildTools({ client, hasKey }) {
     const priced = [], skipped = [];
     for (const leg of legs) {
       try {
+        const market = normalizeMarket(leg.market);
+        if (!market) {
+          skipped.push({ gameId: leg.gameId, pick: leg.pick, reason: 'only moneyline, spread and total legs can be graded' });
+          continue;
+        }
+        if (market !== 'moneyline') {
+          const game = await client.get(idPath(PUBLIC.game, leg.gameId)).then(unwrap);
+          const matchup = game?.away && game?.home ? `${game.away.name} @ ${game.home.name}` : leg.gameId;
+          const r = priceLineLeg(game, leg);
+          if (r.error) skipped.push({ gameId: leg.gameId, market, pick: leg.pick, line: leg.line, matchup, reason: r.error });
+          else priced.push({ gameId: leg.gameId, matchup, ...r });
+          continue;
+        }
         const [game, analysis] = await Promise.all([
           client.get(idPath(PUBLIC.game, leg.gameId)).then(unwrap),
           client.get(idPath(PUBLIC.analysis, leg.gameId)).then(unwrap),
@@ -86,16 +100,27 @@ export function buildTools({ client, hasKey }) {
       name: 'grade_parlay',
       description:
         'Grade a parlay with the Sports Jedi Parlay Grader: confidence per leg, combined confidence and risk. Works without an API key. ' +
-        'Each leg is a game id plus the team abbreviation picked to win. Call get_games first to find the ' +
-        'game ids and team abbreviations for the matchups the user named.',
+        'Legs can be moneyline (team to win), spread (team and its line, e.g. KC -3.5) or total (OVER/UNDER and the number). ' +
+        'If the user shares a screenshot or photo of a bet slip, read every leg from the image yourself (teams, bet type, line) and grade it; ' +
+        'do not ask them to type it. Call get_games first to find the game ids and team abbreviations for the matchups. ' +
+        'Player props, team totals, first-half and other bets cannot be graded: list them back to the user as not graded.',
       shape: {
         legs: z.array(z.object({
           gameId: z.string().min(1).describe('Game id from get_games'),
-          pick: z.string().min(2).max(6).describe('Team abbreviation picked to win, from get_games'),
+          market: z.enum(['moneyline', 'spread', 'total']).optional().describe('Bet type; default moneyline'),
+          pick: z.string().min(1).max(6).describe('Team abbreviation from get_games (moneyline, spread), or OVER / UNDER (total)'),
+          line: z.number().optional().describe("Spread: the picked team's line, e.g. -3.5 or 7. Total: the number, e.g. 221.5. From the bet slip; omit to use the current consensus line"),
         })).min(1).max(15),
       },
       handler: async ({ legs }) => hasKey
-        ? text(await client.post(ENDPOINTS.gradeParlay, { legs: legs.map(l => ({ gameId: l.gameId, pick: l.pick.toUpperCase() })) }))
+        ? text(await client.post(ENDPOINTS.gradeParlay, {
+          legs: legs.map(l => {
+            const market = normalizeMarket(l.market);
+            const base = { gameId: l.gameId, pick: l.pick.toUpperCase() };
+            if (!market || market === 'moneyline') return base;
+            return { ...base, market, ...(l.line === undefined ? {} : { line: l.line }) };
+          }),
+        }))
         : text(await freeParlay(legs), { note: FREE_NOTE }),
     },
     {
