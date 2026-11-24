@@ -14,8 +14,8 @@
       "environmentVariables": [
         {
           "name": "SPORTS_JEDI_API_KEY",
-          "description": "Sports Jedi developer API key (optional; free mode without it)",
-          "isRequired": false,
+          "description": "Sports Jedi developer API key (sj_live_…). Get one at https://sportsjedi.com/developers",
+          "isRequired": true,
           "isSecret": true
         }
       ]
