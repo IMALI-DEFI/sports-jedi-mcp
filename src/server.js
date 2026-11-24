@@ -9,7 +9,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createClient } from './client.js';
 import { buildTools } from './tools.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const apiKey = process.env.SPORTS_JEDI_API_KEY || '';
 const client = createClient({
   baseUrl: process.env.SPORTS_JEDI_API_URL || 'https://api.sportsjedi.com',
